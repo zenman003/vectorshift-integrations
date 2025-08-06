@@ -96,9 +96,12 @@ async def oauth2callback_airtable(request: Request) -> HTMLResponse:
             delete_key_redis(f'airtable_state:{org_id}:{user_id}'),
             delete_key_redis(f'airtable_verifier:{org_id}:{user_id}'),
         )
+    if response.status_code != 200:
+        logger.error(f"Failed to exchange code for token: {response.status_code} - {response.text}")
+        raise HTTPException(status_code=400, detail='Failed to exchange code for token.')
+    credentials = AirtableCredentials.model_validate_json(response.json())
+    await add_key_value_redis(f'airtable_credentials:{org_id}:{user_id}', credentials.model_dump_json(), expire=settings.airtable_credentials_expiry_seconds)
 
-    await add_key_value_redis(f'airtable_credentials:{org_id}:{user_id}', json.dumps(response.json()), expire=settings.airtable_credentials_expiry_seconds)
-    
     close_window_script = """
     <html>
         <script>
