@@ -123,16 +123,15 @@ async def get_airtable_credentials(user_id: str, org_id: str) -> AirtableCredent
 def create_integration_item_metadata_object(
     response_json: dict, item_type: str, parent_id: Optional[str] = None, parent_name: Optional[str] = None
 ) -> IntegrationItem:
+    """Create internal dataclass from API response"""
     parent_id = None if parent_id is None else parent_id + '_Base'
-    integration_item_metadata = IntegrationItem(
+    return IntegrationItem(
         id=response_json.get('id', None) + '_' + item_type,
         name=response_json.get('name', None),
         type=item_type,
         parent_id=parent_id,
         parent_path_or_name=parent_name,
     )
-
-    return integration_item_metadata
 
 
 def fetch_items(
@@ -161,6 +160,7 @@ def fetch_items(
 
 
 async def get_items_airtable(credentials: str) -> List[IntegrationItem]:
+    """External API function returning Pydantic models"""
     credentials_data = AirtableCredentials.model_validate_json(credentials)
     url = 'https://api.airtable.com/v0/meta/bases'
     list_of_integration_item_metadata = []

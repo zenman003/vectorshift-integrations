@@ -17,7 +17,6 @@ from config import settings
 from integrations.integration_item import IntegrationItem
 from redis_client import add_key_value_redis, get_value_redis, delete_key_redis
 
-# Configure logging
 logger = logging.getLogger(__name__)
 
 class NotionState(BaseModel):
@@ -129,7 +128,7 @@ def _recursive_dict_search(data: dict, target_key: str) -> Optional[str]:
 def create_integration_item_metadata_object(
     response_json: dict, item_type: str, parent_id: Optional[str] = None, parent_name: Optional[str] = None
 ) -> IntegrationItem:
-    """Creates an integration metadata object from the response"""
+    """Creates an internal dataclass from the response"""
     try:
         name = _recursive_dict_search(response_json.get('properties', {}), 'content')
         
@@ -142,7 +141,7 @@ def create_integration_item_metadata_object(
         name = 'multi_select' if name is None else name
         name = response_json.get('object', '') + ' ' + str(name)
 
-        integration_item_metadata = IntegrationItem(
+        return IntegrationItem(
             id=response_json.get('id'),
             type=item_type or response_json.get('object'),
             name=name,
@@ -151,11 +150,9 @@ def create_integration_item_metadata_object(
             parent_id=computed_parent_id,
             parent_path_or_name=parent_name,
         )
-
-        return integration_item_metadata
     except Exception as err:
         logger.error(f"Error creating integration item metadata: {err}")
-        # Return a basic item on error
+        
         return IntegrationItem(
             id=response_json.get('id', 'unknown'),
             type=item_type or response_json.get('object', 'unknown'),
@@ -163,7 +160,7 @@ def create_integration_item_metadata_object(
         )
 
 async def get_items_notion(credentials: str) -> List[IntegrationItem]:
-    """Aggregates all metadata relevant for a notion integration"""
+    """External API function returning Pydantic models"""
     try:
         credentials_data = NotionCredentials.model_validate_json(credentials)
         response = requests.post(
@@ -176,7 +173,7 @@ async def get_items_notion(credentials: str) -> List[IntegrationItem]:
 
         if response.status_code == 200:
             results = response.json()['results']
-            list_of_integration_item_metadata = []
+            internal_items: List[IntegrationItem] = []
             for result in results:
                 item_type = result.get('object', 'unknown')
                 parent_id = None
@@ -187,12 +184,13 @@ async def get_items_notion(credentials: str) -> List[IntegrationItem]:
                     if parent_type and parent_type in result.get('parent', {}):
                         parent_id = result.get('parent', {}).get(parent_type)
                 
-                list_of_integration_item_metadata.append(
+                internal_items.append(
                     create_integration_item_metadata_object(result, item_type, parent_id, parent_name)
                 )
 
-            logger.info(f'Retrieved {len(list_of_integration_item_metadata)} integration items')
-            return list_of_integration_item_metadata
+            logger.info(f'Retrieved {len(internal_items)} integration items')
+            
+            return internal_items
         else:
             logger.error(f"Failed to fetch Notion items: {response.status_code} - {response.text}")
             raise HTTPException(status_code=500, detail="Failed to retrieve Notion items")
