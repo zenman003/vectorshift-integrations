@@ -1,5 +1,5 @@
 # config.py
-from pydantic import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     airtable_redirect_uri: str
     airtable_state_expiry_seconds: int = 600
     airtable_credentials_expiry_seconds: int = 600
-    airtable_scope: str = 'data.records:read data.records:write data.recordComments:read data.recordComments:write schema.bases:read schema.bases:write'
+    airtable_scope: str = 'data.records:read data.records:write data.recordComments:read data.recordComments:write schema.bases:read schema.bases:write user.email:read'
 
     # Notion Configuration
     notion_client_id: str
@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     hubspot_client_id: str
     hubspot_client_secret: str
     hubspot_redirect_uri: str
-    hubspot_scope: str = 'crm.objects.contacts.read oauth'
+    hubspot_scope: str = 'crm.objects.contacts.read crm.objects.contacts.write crm.objects.companies.read crm.objects.companies.write crm.objects.deals.read crm.objects.deals.write oauth'
     hubspot_state_expiry_seconds: int = 600
     hubspot_credentials_expiry_seconds: int = 600
 
