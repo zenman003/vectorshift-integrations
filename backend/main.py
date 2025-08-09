@@ -1,8 +1,29 @@
+import logging
+
 import httpx
+from core import set_client
+from core.redis_store import RedisStore
+from integrations.adapters.airtable import AirtableAdapter
+from integrations.adapters.hubspot import HubspotAdapter
+from integrations.adapters.notion import NotionAdapter
+from integrations.core import register_adapter
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from http_client import set_client
-from integrations.registry import get_adapter
+from integrations.core import get_adapter
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+
+logger = logging.getLogger(__name__)
+
+
+def register_adapters_with_dependencies(client: httpx.AsyncClient):
+    kv = RedisStore()
+    register_adapter("airtable", AirtableAdapter(client, kv))
+    register_adapter("hubspot", HubspotAdapter(client, kv))
+    register_adapter("notion", NotionAdapter(client, kv))
 
 
 async def lifespan(app: FastAPI):
@@ -12,8 +33,13 @@ async def lifespan(app: FastAPI):
         headers={"User-Agent": "vectorshift-integrations/1.0"},
     )
     set_client(client)
+
+    register_adapters_with_dependencies(client)
+
     yield
+
     await client.aclose()
+
 
 app = FastAPI(lifespan=lifespan)
 origins = [
@@ -28,8 +54,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.post('/integrations/{provider}/authorize')
-async def authorize_integration(provider: str, user_id: str = Form(...), org_id: str = Form(...)):
+
+@app.post("/integrations/{provider}/authorize")
+async def authorize_integration(
+    provider: str, user_id: str = Form(...), org_id: str = Form(...)
+):
     """Generic authorize endpoint for any registered provider."""
     try:
         adapter = get_adapter(provider)
@@ -38,7 +67,7 @@ async def authorize_integration(provider: str, user_id: str = Form(...), org_id:
         raise HTTPException(status_code=404, detail=f"Provider '{provider}' not found")
 
 
-@app.get('/integrations/{provider}/oauth2callback')
+@app.get("/integrations/{provider}/oauth2callback")
 async def oauth_callback_integration(provider: str, request: Request):
     """Generic OAuth callback endpoint for any registered provider."""
     try:
@@ -48,8 +77,10 @@ async def oauth_callback_integration(provider: str, request: Request):
         raise HTTPException(status_code=404, detail=f"Provider '{provider}' not found")
 
 
-@app.post('/integrations/{provider}/credentials')
-async def get_credentials_integration(provider: str, user_id: str = Form(...), org_id: str = Form(...)):
+@app.post("/integrations/{provider}/credentials")
+async def get_credentials_integration(
+    provider: str, user_id: str = Form(...), org_id: str = Form(...)
+):
     """Generic credentials endpoint for any registered provider."""
     try:
         adapter = get_adapter(provider)
@@ -58,7 +89,7 @@ async def get_credentials_integration(provider: str, user_id: str = Form(...), o
         raise HTTPException(status_code=404, detail=f"Provider '{provider}' not found")
 
 
-@app.post('/integrations/{provider}/load')
+@app.post("/integrations/{provider}/load")
 async def get_items_integration(provider: str, credentials: str = Form(...)):
     """Generic load items endpoint for any registered provider."""
     try:

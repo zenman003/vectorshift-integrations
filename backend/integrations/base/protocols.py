@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, List, Protocol
 
 from fastapi import Request
-from integrations.integration_item import IntegrationItem
+from integrations.core.integration_item import IntegrationItem
 
 
 class IntegrationAdapter(Protocol):

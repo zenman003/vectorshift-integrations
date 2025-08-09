@@ -4,26 +4,30 @@ import logging
 from typing import List, Optional
 
 import httpx
-from config import settings
 from fastapi import HTTPException, Request
-from integrations.base.oauth import PKCEOAuthStrategy, oauth_close_window
-from integrations.integration_item import IntegrationItem
-from integrations.item_types import ItemType
-from integrations.models import AirtableCredentials
-from integrations.registry import register_adapter
-from redis_client import add_key_value_redis, delete_key_redis, get_value_redis
+
+from core import settings
+from core.contracts import KeyValueStore
+from integrations.base import PKCEOAuthStrategy, oauth_close_window
+from integrations.core import (
+    AirtableCredentials,
+    IntegrationItem,
+    ItemType,
+)
 
 logger = logging.getLogger(__name__)
 
 
 class AirtableAdapter:
-    def __init__(self):
+    def __init__(self, http: httpx.AsyncClient, kv_store: KeyValueStore):
         """Initialize AirtableAdapter with OAuth and config."""
         self.authorization_url = f"https://airtable.com/oauth2/v1/authorize?client_id={settings.airtable_client_id}&response_type=code&owner=user&redirect_uri={settings.airtable_redirect_uri.replace(':', '%3A').replace('/', '%2F')}"
         self.encoded_client_id_secret = base64.b64encode(
             f"{settings.airtable_client_id}:{settings.airtable_client_secret}".encode()
         ).decode()
-        self.oauth_strategy = PKCEOAuthStrategy("airtable")
+        self.http = http
+        self.kv_store = kv_store
+        self.oauth_strategy = PKCEOAuthStrategy("airtable", self.kv_store)
 
     async def authorize(self, user_id: str, org_id: str) -> str:
         """Return Airtable OAuth authorization URL with PKCE."""
@@ -34,7 +38,7 @@ class AirtableAdapter:
 
     async def oauth_callback(self, request: Request):
         """Handle Airtable OAuth callback and store credentials."""
-        result = await self.oauth_strategy.callback(request)
+        result = await self.oauth_strategy.callback(dict(request.query_params))
         code, user_id, org_id, code_verifier = (
             result["code"],
             result["user_id"],
@@ -42,21 +46,20 @@ class AirtableAdapter:
             result["code_verifier"],
         )
 
-        async with httpx.AsyncClient(timeout=settings.http_timeout_seconds) as client:
-            response = await client.post(
-                "https://airtable.com/oauth2/v1/token",
-                data={
-                    "grant_type": "authorization_code",
-                    "code": code,
-                    "redirect_uri": settings.airtable_redirect_uri,
-                    "client_id": settings.airtable_client_id,
-                    "code_verifier": code_verifier,
-                },
-                headers={
-                    "Authorization": f"Basic {self.encoded_client_id_secret}",
-                    "Content-Type": "application/x-www-form-urlencoded",
-                },
-            )
+        response = await self.http.post(
+            "https://airtable.com/oauth2/v1/token",
+            data={
+                "grant_type": "authorization_code",
+                "code": code,
+                "redirect_uri": settings.airtable_redirect_uri,
+                "client_id": settings.airtable_client_id,
+                "code_verifier": code_verifier,
+            },
+            headers={
+                "Authorization": f"Basic {self.encoded_client_id_secret}",
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+        )
 
         if response.status_code != 200:
             logger.error(
@@ -67,7 +70,7 @@ class AirtableAdapter:
             )
 
         credentials = AirtableCredentials.model_validate(response.json())
-        await add_key_value_redis(
+        await self.kv_store.set(
             f"airtable_credentials:{org_id}:{user_id}",
             credentials.model_dump_json(),
             expire=settings.airtable_credentials_expiry_seconds,
@@ -76,11 +79,13 @@ class AirtableAdapter:
 
     async def get_credentials(self, user_id: str, org_id: str):
         """Retrieve and delete Airtable credentials from Redis."""
-        credentials = await get_value_redis(f"airtable_credentials:{org_id}:{user_id}")
+        credentials = await self.kv_store.get(
+            f"airtable_credentials:{org_id}:{user_id}"
+        )
         if not credentials:
             raise HTTPException(status_code=400, detail="No credentials found.")
         credentials_data = AirtableCredentials.model_validate_json(credentials)
-        await delete_key_redis(f"airtable_credentials:{org_id}:{user_id}")
+        await self.kv_store.delete(f"airtable_credentials:{org_id}:{user_id}")
         return credentials_data
 
     async def list_items(self, credentials: str) -> List[IntegrationItem]:
@@ -98,13 +103,12 @@ class AirtableAdapter:
                 list_of_integration_item_metadata.append(
                     self._create_integration_item_metadata_object(response, "Base")
                 )
-                async with httpx.AsyncClient(timeout=settings.http_timeout_seconds) as client:
-                    tables_response = await client.get(
-                        f"https://api.airtable.com/v0/meta/bases/{response.get('id')}/tables",
-                        headers={
-                            "Authorization": f"Bearer {credentials_data.access_token}"
-                        },
-                    )
+                tables_response = await self.http.get(
+                    f"https://api.airtable.com/v0/meta/bases/{response.get('id')}/tables",
+                    headers={
+                        "Authorization": f"Bearer {credentials_data.access_token}"
+                    },
+                )
                 if tables_response.status_code == 200:
                     tables_response = tables_response.json()
                     for table in tables_response["tables"]:
@@ -124,6 +128,7 @@ class AirtableAdapter:
             logger.info(
                 f"Retrieved {len(list_of_integration_item_metadata)} integration items"
             )
+            logger.info(f"Integration items: {list_of_integration_item_metadata}")
             return list_of_integration_item_metadata
         except Exception as err:
             logger.error(f"Error getting Airtable items: {err}")
@@ -142,25 +147,24 @@ class AirtableAdapter:
         try:
             next_offset = offset
             headers = {"Authorization": f"Bearer {access_token}"}
-            async with httpx.AsyncClient(timeout=settings.http_timeout_seconds) as client:
-                while True:
-                    params = {"offset": next_offset} if next_offset is not None else {}
-                    response = await client.get(url, headers=headers, params=params)
+            while True:
+                params = {"offset": next_offset} if next_offset is not None else {}
+                response = await self.http.get(url, headers=headers, params=params)
 
-                    if response.status_code != 200:
-                        logger.error(
-                            f"Failed to fetch items: status={response.status_code}"
-                        )
-                        break
+                if response.status_code != 200:
+                    logger.error(
+                        f"Failed to fetch items: status={response.status_code}"
+                    )
+                    break
 
-                    json_body = response.json()
-                    results = json_body.get("bases", {})
-                    for item in results:
-                        aggregated_response.append(item)
+                json_body = response.json()
+                results = json_body.get("bases", {})
+                for item in results:
+                    aggregated_response.append(item)
 
-                    next_offset = json_body.get("offset")
-                    if not next_offset:
-                        break
+                next_offset = json_body.get("offset")
+                if not next_offset:
+                    break
         except Exception as err:
             logger.error(f"Error fetching items: {err}")
             raise
@@ -186,6 +190,3 @@ class AirtableAdapter:
             parent_id=parent_id,
             parent_path_or_name=parent_name,
         )
-
-
-register_adapter("airtable", AirtableAdapter())

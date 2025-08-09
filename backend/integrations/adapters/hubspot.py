@@ -4,14 +4,16 @@ from datetime import datetime
 from typing import List, Optional
 
 import httpx
-from config import settings
 from fastapi import HTTPException, Request
-from integrations.base.oauth import StandardOAuthStrategy, oauth_close_window
-from integrations.integration_item import IntegrationItem
-from integrations.item_types import ItemType
-from integrations.models import HubSpotCredentials
-from integrations.registry import register_adapter
-from redis_client import add_key_value_redis, delete_key_redis, get_value_redis
+
+from core import settings
+from core.contracts import KeyValueStore
+from integrations.base import StandardOAuthStrategy, oauth_close_window
+from integrations.core import (
+    HubSpotCredentials,
+    IntegrationItem,
+    ItemType,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -35,9 +37,11 @@ HUBSPOT_OBJECT_CONFIGS = {
 
 
 class HubspotAdapter:
-    def __init__(self):
+    def __init__(self, http: httpx.AsyncClient, kv_store: KeyValueStore):
         self.authorization_url = f"https://app.hubspot.com/oauth/authorize?client_id={settings.hubspot_client_id}&scope={settings.hubspot_scope.replace(' ', '%20')}&redirect_uri={settings.hubspot_redirect_uri.replace(':', '%3A').replace('/', '%2F')}"
-        self.oauth_strategy = StandardOAuthStrategy("hubspot")
+        self.http = http
+        self.kv_store = kv_store
+        self.oauth_strategy = StandardOAuthStrategy("hubspot", self.kv_store)
 
     async def authorize(self, user_id: str, org_id: str) -> str:
         """HubSpot OAuth strategy - standard OAuth 2.0 flow."""
@@ -48,21 +52,20 @@ class HubspotAdapter:
 
     async def oauth_callback(self, request: Request):
         """HubSpot OAuth callback strategy - standard OAuth 2.0 flow."""
-        result = await self.oauth_strategy.callback(request)
+        result = await self.oauth_strategy.callback(dict(request.query_params))
         code, user_id, org_id = result["code"], result["user_id"], result["org_id"]
 
-        async with httpx.AsyncClient(timeout=settings.http_timeout_seconds) as client:
-            response = await client.post(
-                "https://api.hubapi.com/oauth/v1/token",
-                data={
-                    "grant_type": "authorization_code",
-                    "client_id": settings.hubspot_client_id,
-                    "client_secret": settings.hubspot_client_secret,
-                    "redirect_uri": settings.hubspot_redirect_uri,
-                    "code": code,
-                },
-                headers={"Content-Type": "application/x-www-form-urlencoded"},
-            )
+        response = await self.http.post(
+            "https://api.hubapi.com/oauth/v1/token",
+            data={
+                "grant_type": "authorization_code",
+                "client_id": settings.hubspot_client_id,
+                "client_secret": settings.hubspot_client_secret,
+                "redirect_uri": settings.hubspot_redirect_uri,
+                "code": code,
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
 
         if response.status_code != 200:
             logger.error(
@@ -74,7 +77,7 @@ class HubspotAdapter:
             )
 
         credentials = HubSpotCredentials.model_validate(response.json())
-        await add_key_value_redis(
+        await self.kv_store.set(
             f"hubspot_credentials:{org_id}:{user_id}",
             credentials.model_dump_json(),
             expire=settings.hubspot_credentials_expiry_seconds,
@@ -83,11 +86,11 @@ class HubspotAdapter:
 
     async def get_credentials(self, user_id: str, org_id: str):
         """HubSpot credentials retrieval strategy."""
-        credentials = await get_value_redis(f"hubspot_credentials:{org_id}:{user_id}")
+        credentials = await self.kv_store.get(f"hubspot_credentials:{org_id}:{user_id}")
         if not credentials:
             raise HTTPException(status_code=400, detail="No credentials found.")
         credentials_data = HubSpotCredentials.model_validate_json(credentials)
-        await delete_key_redis(f"hubspot_credentials:{org_id}:{user_id}")
+        await self.kv_store.delete(f"hubspot_credentials:{org_id}:{user_id}")
         return credentials_data
 
     async def list_items(self, credentials: str) -> List[IntegrationItem]:
@@ -126,6 +129,7 @@ class HubspotAdapter:
             logger.info(
                 f"Retrieved {len(list_of_integration_items)} total HubSpot integration items"
             )
+            logger.info(f"HubSpot integration items: {list_of_integration_items}")
             return list_of_integration_items
 
         except Exception as err:
@@ -156,13 +160,11 @@ class HubspotAdapter:
                 params["after"] = after
 
             headers = {"Authorization": f"Bearer {access_token}"}
-
-            async with httpx.AsyncClient(timeout=settings.http_timeout_seconds) as client:
-                response = await client.get(
-                    f"https://api.hubapi.com/crm/v3/objects/{object_type}",
-                    headers=headers,
-                    params=params,
-                )
+            response = await self.http.get(
+                f"https://api.hubapi.com/crm/v3/objects/{object_type}",
+                headers=headers,
+                params=params,
+            )
 
             if response.status_code == 200:
                 response_data = response.json()
@@ -177,12 +179,11 @@ class HubspotAdapter:
                 if after_token:
                     while after_token:
                         params["after"] = after_token
-                        async with httpx.AsyncClient(timeout=settings.http_timeout_seconds) as client:
-                            response = await client.get(
-                                f"https://api.hubapi.com/crm/v3/objects/{object_type}",
-                                headers=headers,
-                                params=params,
-                            )
+                        response = await self.http.get(
+                            f"https://api.hubapi.com/crm/v3/objects/{object_type}",
+                            headers=headers,
+                            params=params,
+                        )
                         if response.status_code != 200:
                             logger.error(
                                 f"Failed to fetch {object_type}: status={response.status_code}"
@@ -193,9 +194,7 @@ class HubspotAdapter:
                         for item in results:
                             aggregated_response.append(item)
                         after_token = (
-                            response_data.get("paging", {})
-                            .get("next", {})
-                            .get("after")
+                            response_data.get("paging", {}).get("next", {}).get("after")
                         )
 
             elif response.status_code == 401:
@@ -244,9 +243,15 @@ class HubspotAdapter:
             if not date_str:
                 return None
             try:
-                timestamp = int(date_str) / 1000
-                return datetime.fromtimestamp(timestamp)
-            except (ValueError, TypeError):
+                if isinstance(date_str, int) or (
+                    isinstance(date_str, str)
+                    and date_str.isdigit()
+                    and len(date_str) == 13
+                ):
+                    timestamp = int(date_str) / 1000
+                    return datetime.fromtimestamp(timestamp)
+                return datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+            except Exception:
                 return None
 
         is_directory = item_type == ItemType.COMPANIES
@@ -296,4 +301,4 @@ class HubspotAdapter:
         )
 
 
-register_adapter("hubspot", HubspotAdapter())
+# Registration moved to main where dependencies are injected

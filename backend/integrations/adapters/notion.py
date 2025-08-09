@@ -4,26 +4,30 @@ import logging
 from typing import List, Optional
 
 import httpx
-from config import settings
+from core import settings
+from core.contracts import KeyValueStore
 from fastapi import HTTPException, Request
-from integrations.base.oauth import StandardOAuthStrategy, oauth_close_window
-from integrations.integration_item import IntegrationItem
-from integrations.item_types import ItemType
-from integrations.models import NotionCredentials
-from integrations.registry import register_adapter
-from redis_client import add_key_value_redis, delete_key_redis, get_value_redis
+
+from integrations.base import StandardOAuthStrategy, oauth_close_window
+from integrations.core import (
+    IntegrationItem,
+    ItemType,
+    NotionCredentials,
+)
 
 logger = logging.getLogger(__name__)
 
 
 class NotionAdapter:
-    def __init__(self):
+    def __init__(self, http: httpx.AsyncClient, kv_store: KeyValueStore):
         """Initialize NotionAdapter with OAuth and config."""
         self.authorization_url = f"https://api.notion.com/v1/oauth/authorize?client_id={settings.notion_client_id}&response_type=code&owner=user&redirect_uri={settings.notion_redirect_uri.replace(':', '%3A').replace('/', '%2F')}"
         self.encoded_client_id_secret = base64.b64encode(
             f"{settings.notion_client_id}:{settings.notion_client_secret}".encode()
         ).decode()
-        self.oauth_strategy = StandardOAuthStrategy("notion")
+        self.http = http
+        self.kv_store = kv_store
+        self.oauth_strategy = StandardOAuthStrategy("notion", self.kv_store)
 
     async def authorize(self, user_id: str, org_id: str) -> str:
         """Notion OAuth strategy - standard OAuth 2.0 flow."""
@@ -34,22 +38,21 @@ class NotionAdapter:
 
     async def oauth_callback(self, request: Request):
         """Notion OAuth callback strategy - uses JSON content type."""
-        result = await self.oauth_strategy.callback(request)
+        result = await self.oauth_strategy.callback(dict(request.query_params))
         code, user_id, org_id = result["code"], result["user_id"], result["org_id"]
 
-        async with httpx.AsyncClient(timeout=settings.http_timeout_seconds) as client:
-            response = await client.post(
-                "https://api.notion.com/v1/oauth/token",
-                json={
-                    "grant_type": "authorization_code",
-                    "code": code,
-                    "redirect_uri": settings.notion_redirect_uri,
-                },
-                headers={
-                    "Authorization": f"Basic {self.encoded_client_id_secret}",
-                    "Content-Type": "application/json",
-                },
-            )
+        response = await self.http.post(
+            "https://api.notion.com/v1/oauth/token",
+            json={
+                "grant_type": "authorization_code",
+                "code": code,
+                "redirect_uri": settings.notion_redirect_uri,
+            },
+            headers={
+                "Authorization": f"Basic {self.encoded_client_id_secret}",
+                "Content-Type": "application/json",
+            },
+        )
 
         if response.status_code != 200:
             logger.error(
@@ -60,7 +63,7 @@ class NotionAdapter:
             )
 
         credentials = NotionCredentials.model_validate(response.json())
-        await add_key_value_redis(
+        await self.kv_store.set(
             f"notion_credentials:{org_id}:{user_id}",
             credentials.model_dump_json(),
             expire=settings.notion_credentials_expiry_seconds,
@@ -69,27 +72,26 @@ class NotionAdapter:
 
     async def get_credentials(self, user_id: str, org_id: str):
         """Notion credentials retrieval strategy."""
-        credentials = await get_value_redis(f"notion_credentials:{org_id}:{user_id}")
+        credentials = await self.kv_store.get(f"notion_credentials:{org_id}:{user_id}")
         if not credentials:
             raise HTTPException(status_code=400, detail="No credentials found.")
         credentials_data = NotionCredentials.model_validate_json(credentials)
-        await delete_key_redis(f"notion_credentials:{org_id}:{user_id}")
+        await self.kv_store.delete(f"notion_credentials:{org_id}:{user_id}")
         return credentials_data
 
     async def list_items(self, credentials: str) -> List[IntegrationItem]:
         """List Notion items as IntegrationItems."""
         try:
             credentials_data = NotionCredentials.model_validate_json(credentials)
-            async with httpx.AsyncClient(timeout=settings.http_timeout_seconds) as client:
-                response = await client.post(
-                    "https://api.notion.com/v1/search",
-                    json={},
-                    headers={
-                        "Authorization": f"Bearer {credentials_data.access_token}",
-                        "Notion-Version": "2022-06-28",
-                        "Content-Type": "application/json",
-                    },
-                )
+            response = await self.http.post(
+                "https://api.notion.com/v1/search",
+                json={},
+                headers={
+                    "Authorization": f"Bearer {credentials_data.access_token}",
+                    "Notion-Version": "2022-06-28",
+                    "Content-Type": "application/json",
+                },
+            )
 
             if response.status_code == 200:
                 results = response.json()["results"]
@@ -111,7 +113,7 @@ class NotionAdapter:
                     )
 
                 logger.info(f"Retrieved {len(internal_items)} integration items")
-
+                logger.info(f"Integration items: {internal_items}")
                 return internal_items
             else:
                 logger.error(
@@ -171,9 +173,9 @@ class NotionAdapter:
             "database": ItemType.DATABASES,
         }
         return IntegrationItem(
-                id=response_json.get("id", "unknown"),
-                type=type_map.get(item_type, ItemType.UNKNOWN),
-                name=f"Error parsing {response_json.get('object', 'item')}",
+            id=response_json.get("id", "unknown"),
+            type=type_map.get(item_type, ItemType.UNKNOWN),
+            name=f"Error parsing {response_json.get('object', 'item')}",
         )
 
     def _recursive_dict_search(self, data: dict, target_key: str) -> Optional[str]:
@@ -196,6 +198,3 @@ class NotionAdapter:
                         if result is not None:
                             return result
         return None
-
-
-register_adapter("notion", NotionAdapter())
