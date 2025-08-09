@@ -1,8 +1,10 @@
+# backend/integrations/base/protocols.py
 from __future__ import annotations
 
 from typing import Any, List, Protocol
 
 from fastapi import Request
+
 from integrations.core.integration_item import IntegrationItem
 
 

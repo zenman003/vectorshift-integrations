@@ -1,4 +1,4 @@
-# Auto-import all adapters in this directory
+# backend/integrations/adapters/__init__.py
 from . import airtable, notion, hubspot
 
 __all__ = ["airtable", "notion", "hubspot"]

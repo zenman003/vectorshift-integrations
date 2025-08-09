@@ -4,10 +4,10 @@ from datetime import datetime
 from typing import List, Optional
 
 import httpx
-from fastapi import HTTPException, Request
-
 from core import settings
 from core.contracts import KeyValueStore
+from fastapi import HTTPException, Request
+
 from integrations.base import StandardOAuthStrategy, oauth_close_window
 from integrations.core import (
     HubSpotCredentials,

@@ -1,3 +1,4 @@
+# backend/integrations/core/item_types.py
 from enum import Enum
 
 

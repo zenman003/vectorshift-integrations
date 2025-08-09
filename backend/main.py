@@ -1,15 +1,15 @@
+# backend/main.py
 import logging
 
 import httpx
 from core import set_client
 from core.redis_store import RedisStore
+from fastapi import FastAPI, Form, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from integrations.adapters.airtable import AirtableAdapter
 from integrations.adapters.hubspot import HubspotAdapter
 from integrations.adapters.notion import NotionAdapter
-from integrations.core import register_adapter
-from fastapi import FastAPI, Form, HTTPException, Request
-from fastapi.middleware.cors import CORSMiddleware
-from integrations.core import get_adapter
+from integrations.core import get_adapter, register_adapter
 
 logging.basicConfig(
     level=logging.INFO,

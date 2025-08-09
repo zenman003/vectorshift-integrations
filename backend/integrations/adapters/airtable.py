@@ -4,10 +4,10 @@ import logging
 from typing import List, Optional
 
 import httpx
-from fastapi import HTTPException, Request
-
 from core import settings
 from core.contracts import KeyValueStore
+from fastapi import HTTPException, Request
+
 from integrations.base import PKCEOAuthStrategy, oauth_close_window
 from integrations.core import (
     AirtableCredentials,

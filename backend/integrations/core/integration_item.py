@@ -1,9 +1,11 @@
+# backend/integrations/core/integration_item.py
 from datetime import datetime
 from typing import List, Optional
 
-from integrations.core.item_types import ItemType
 from pydantic import AnyUrl
 from pydantic.dataclasses import dataclass
+
+from integrations.core.item_types import ItemType
 
 
 @dataclass

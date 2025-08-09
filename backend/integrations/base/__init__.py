@@ -1,4 +1,4 @@
-# Base classes and protocols for integrations
+# backend/integrations/base/__init__.py
 from .oauth import PKCEOAuthStrategy, StandardOAuthStrategy, oauth_close_window
 from .protocols import IntegrationAdapter
 

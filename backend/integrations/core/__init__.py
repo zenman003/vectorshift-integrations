@@ -1,4 +1,4 @@
-# Core integration types and utilities
+# backend/integrations/core/__init__.py
 from .integration_item import IntegrationItem
 from .item_types import ItemType
 from .models import (
