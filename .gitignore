@@ -39,4 +39,9 @@ requirements_lock.txt
 # Misc
 *.pdf
 
+# .github
+.github/copilot-instructions.md
+
+#
+**/*/venv
 

@@ -4,11 +4,10 @@ import base64
 import secrets
 from abc import ABC, abstractmethod
 
-from fastapi import Request, HTTPException
+from fastapi import HTTPException, Request
 from fastapi.responses import HTMLResponse
-
 from integrations.models import OAuthState
-from redis_client import add_key_value_redis, get_value_redis, delete_key_redis
+from redis_client import add_key_value_redis, delete_key_redis, get_value_redis
 
 
 class OAuthStrategy(ABC):

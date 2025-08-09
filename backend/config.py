@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     oauth_state_length: int = 32
     oauth_code_verifier_length: int = 32
 
+    # HTTP Configuration
+    http_timeout_seconds: int = 10
+
     model_config = SettingsConfigDict(env_file = '.env')
 
 

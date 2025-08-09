@@ -1,0 +1,14 @@
+from enum import Enum
+
+
+class ItemType(str, Enum):
+    CONTACTS = "contacts"
+    COMPANIES = "companies"
+    DEALS = "deals"
+    BASES = "bases"
+    TABLES = "tables"
+    PAGES = "pages"
+    DATABASES = "databases"
+    UNKNOWN = "unknown"
+
+

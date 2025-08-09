@@ -1,13 +1,21 @@
-from fastapi import FastAPI, Form, Request, HTTPException, Path
+import httpx
+from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-
-import integrations.airtable 
-import integrations.notion 
-import integrations.hubspot  
+from http_client import set_client
 from integrations.registry import get_adapter
 
-app = FastAPI()
 
+async def lifespan(app: FastAPI):
+    client = httpx.AsyncClient(
+        timeout=10.0,
+        limits=httpx.Limits(max_keepalive_connections=20, max_connections=100),
+        headers={"User-Agent": "vectorshift-integrations/1.0"},
+    )
+    set_client(client)
+    yield
+    await client.aclose()
+
+app = FastAPI(lifespan=lifespan)
 origins = [
     "http://localhost:3000",
 ]

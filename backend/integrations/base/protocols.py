@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import Protocol, List, Any
-from fastapi import Request
+from typing import Any, List, Protocol
 
+from fastapi import Request
 from integrations.integration_item import IntegrationItem
 
 
