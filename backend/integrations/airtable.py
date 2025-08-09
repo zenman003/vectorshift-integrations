@@ -174,9 +174,11 @@ class AirtableAdapter:
     ) -> IntegrationItem:
         """Create IntegrationItem metadata object for Airtable base/table."""
         parent_id = None if parent_id is None else parent_id + "_Base"
-        mapped_type = (
-            ItemType.BASES if item_type == "Base" else ItemType.TABLES if item_type == "Table" else ItemType.UNKNOWN
-        )
+        item_type_map = {
+            "Base": ItemType.BASES,
+            "Table": ItemType.TABLES,
+        }
+        mapped_type = item_type_map.get(item_type, ItemType.UNKNOWN)
         return IntegrationItem(
             id=f"{response_json.get('id') or 'unknown'}_{item_type}",
             name=response_json.get("name", None),

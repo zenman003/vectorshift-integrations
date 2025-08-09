@@ -105,7 +105,7 @@ class HubspotAdapter:
                         credentials_data.access_token, object_type, list_of_responses
                     )
 
-                    config = HUBSPOT_OBJECT_CONFIGS[object_type]
+                    _ = HUBSPOT_OBJECT_CONFIGS[object_type]
                     item_type = object_type
 
                     for response in list_of_responses:
@@ -271,9 +271,14 @@ class HubspotAdapter:
 
         url_path = item_type
 
+        try:
+            item_type_enum = ItemType(item_type)
+        except ValueError:
+            item_type_enum = ItemType.UNKNOWN
+
         return IntegrationItem(
             id=object_id,
-            type=ItemType(item_type) if item_type in ItemType._value2member_map_ else ItemType.UNKNOWN,
+            type=item_type_enum,
             directory=is_directory,
             parent_path_or_name=parent_name,
             parent_id=parent_id,

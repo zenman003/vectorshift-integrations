@@ -151,10 +151,13 @@ class NotionAdapter:
             )
             name = "multi_select" if name is None else name
             name = response_json.get("object", "") + " " + str(name)
-
+            type_map = {
+                "page": ItemType.PAGES,
+                "database": ItemType.DATABASES,
+            }
             return IntegrationItem(
                 id=response_json.get("id"),
-                type=ItemType.PAGES if item_type == "page" else ItemType.DATABASES if item_type == "database" else ItemType.UNKNOWN,
+                type=type_map.get(item_type, ItemType.UNKNOWN),
                 name=name,
                 creation_time=response_json.get("created_time"),
                 last_modified_time=response_json.get("last_edited_time"),
@@ -163,12 +166,15 @@ class NotionAdapter:
             )
         except Exception as err:
             logger.error(f"Error creating integration item metadata: {err}")
-
-            return IntegrationItem(
+        type_map = {
+            "page": ItemType.PAGES,
+            "database": ItemType.DATABASES,
+        }
+        return IntegrationItem(
                 id=response_json.get("id", "unknown"),
-                type=ItemType.PAGES if item_type == "page" else ItemType.DATABASES if item_type == "database" else ItemType.UNKNOWN,
+                type=type_map.get(item_type, ItemType.UNKNOWN),
                 name=f"Error parsing {response_json.get('object', 'item')}",
-            )
+        )
 
     def _recursive_dict_search(self, data: dict, target_key: str) -> Optional[str]:
         """Recursively search for a key in a nested dict and return its value."""
