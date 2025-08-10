@@ -60,7 +60,7 @@ export const NotionIntegration = ({ user, org, integrationParams, setIntegration
 
     useEffect(() => {
         setIsConnected(integrationParams?.credentials ? true : false)
-    }, []);
+    }, [integrationParams?.credentials]);
 
     return (
         <>

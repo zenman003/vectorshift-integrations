@@ -1,4 +1,4 @@
-# Vectorshift Integrations – Refactor Summary
+# Vectorshift Integrations – Summary
 
 This project provides a unified FastAPI backend + lightweight React frontend for integrating Airtable, Notion, and HubSpot via a normalized item model.
 
