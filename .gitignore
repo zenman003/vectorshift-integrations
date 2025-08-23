@@ -1,0 +1,47 @@
+# Node.js
+node_modules/
+frontend/node_modules/
+backend/node_modules/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# Environment & secrets
+.env
+*.env.*
+*.local
+
+# Databases & cache
+dump.rdb
+*.db
+*.sqlite3
+
+# Logs
+*.log
+
+# Build & coverage
+build/
+dist/
+coverage/
+
+# IDE & system files
+.vscode/
+.idea/
+*.DS_Store
+
+# Lock files
+*.lock
+requirements_lock.txt
+
+# Misc
+*.pdf
+
+# .github
+.github/copilot-instructions.md
+
+#
+**/*/venv
+
